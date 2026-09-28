@@ -531,3 +531,170 @@ async def test_import_wav_loop_mode_applied() -> None:
     settings = sent.params["import_settings"]
     assert settings["loop_mode"] == 1
     assert settings["loop_begin"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Inline data sources (data: URIs) — the sink for AI-generated assets.
+# Image-gen MCP servers hand back base64 blobs, not files or URLs.
+# ---------------------------------------------------------------------------
+
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+_JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 24
+
+
+def _data_uri(payload: bytes, mime: str = "image/png") -> str:
+    import base64
+
+    return f"data:{mime};base64,{base64.b64encode(payload).decode()}"
+
+
+def _capturing_build() -> tuple[FastMCP, FakeAddonConnection, list[tuple[str, bytes]]]:
+    """Like ``_build`` but records (source path, bytes at that path) per import."""
+    seen: list[tuple[str, bytes]] = []
+
+    def responder(cmd: CommandEnvelope) -> ResponseEnvelope | None:
+        if cmd.command == "cmd_import_asset":
+            src = cmd.params["source"]
+            with open(src, "rb") as fh:
+                seen.append((src, fh.read()))
+            if "fail" in cmd.params["target_path"]:
+                return ResponseEnvelope.failure(cmd.id, "ALREADY_EXISTS", "target exists")
+        return _responder(cmd)
+
+    conn = FakeAddonConnection(responder=responder)
+    bridge = Bridge(ServerConfig().bridge, connector=connector_for(conn))
+    return create_server(ServerConfig(), bridge=bridge), conn, seen
+
+
+async def test_import_asset_accepts_data_uri_and_cleans_up() -> None:
+    server, _, seen = _capturing_build()
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        result = await client.call_tool(
+            "godot_asset_import_asset",
+            {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/gen.png"},
+        )
+    assert result.structured_content["imported"] is True
+    [(src, payload)] = seen
+    assert payload == _PNG_BYTES
+    assert src.endswith(".png")
+    assert not os.path.exists(src), "decoded temp file must be removed after the call"
+
+
+async def test_import_asset_data_uri_content_mismatch_is_refused_even_on_dry_run() -> None:
+    server, conn, _ = _capturing_build()
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        for dry_run in (False, True):
+            with pytest.raises(ToolError, match="VALIDATION_ERROR.*JPEG"):
+                await client.call_tool(
+                    "godot_asset_import_asset",
+                    {
+                        "source": _data_uri(_JPEG_BYTES, "image/jpeg"),
+                        "target_path": "res://art/gen.png",
+                        "dry_run": dry_run,
+                    },
+                )
+    assert "cmd_import_asset" not in _commands(conn)
+
+
+async def test_import_asset_malformed_data_uri_is_refused() -> None:
+    server, conn, _ = _capturing_build()
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        for bad in ("data:image/png;base64,@@not-base64@@", "data:image/png,rawtext"):
+            with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+                await client.call_tool(
+                    "godot_asset_import_asset",
+                    {"source": bad, "target_path": "res://art/gen.png"},
+                )
+    assert "cmd_import_asset" not in _commands(conn)
+
+
+async def test_import_asset_data_uri_size_cap() -> None:
+    server, conn, _ = _capturing_build()
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        with patch("mcp_server.tools.import_asset._MAX_INLINE_BYTES", 16):
+            with pytest.raises(ToolError, match="VALIDATION_ERROR.*too large"):
+                await client.call_tool(
+                    "godot_asset_import_asset",
+                    {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/gen.png"},
+                )
+    assert "cmd_import_asset" not in _commands(conn)
+
+
+# ---------------------------------------------------------------------------
+# Batch import — many generated assets in one call, honest per-item results.
+# ---------------------------------------------------------------------------
+
+
+async def test_import_batch_is_gated_and_mutating() -> None:
+    server, _ = _build()
+    async with Client(server, mode="legacy") as client:
+        assert "godot_asset_import_batch" not in {t.name for t in await client.list_tools()}
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        tools = {t.name: t for t in await client.list_tools()}
+    tool = tools["godot_asset_import_batch"]
+    assert (tool.meta or {}).get("safety_class") == "mutating"
+
+
+async def test_import_batch_reports_per_item_results() -> None:
+    server, _, seen = _capturing_build()
+    items = [
+        {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/a.png"},
+        {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/fail.png"},
+        {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/c.png"},
+    ]
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        result = await client.call_tool("godot_asset_import_batch", {"items": items})
+    out = result.structured_content
+    assert out["ok_all"] is False
+    assert out["imported_count"] == 2
+    assert out["failed_count"] == 1
+    assert [r["ok"] for r in out["results"]] == [True, False, True]
+    assert "ALREADY_EXISTS" in out["results"][1]["error"]
+    assert out.get("aborted_at") is None
+    assert len(seen) == 3
+    assert not any(os.path.exists(src) for src, _ in seen)
+
+
+async def test_import_batch_stop_on_error_is_never_silent() -> None:
+    server, _, seen = _capturing_build()
+    items = [
+        {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/fail.png"},
+        {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/b.png"},
+    ]
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        result = await client.call_tool(
+            "godot_asset_import_batch", {"items": items, "stop_on_error": True}
+        )
+    out = result.structured_content
+    assert out["aborted_at"] == 0
+    assert out["skipped_count"] == 1
+    assert out["hint"]
+    assert len(out["results"]) == 1
+    assert len(seen) == 1
+
+
+async def test_import_batch_dry_run_validates_every_item_and_sends_nothing() -> None:
+    server, conn, _ = _capturing_build()
+    items = [
+        {"source": _data_uri(_PNG_BYTES), "target_path": "res://art/a.png"},
+        {"source": _data_uri(_JPEG_BYTES, "image/jpeg"), "target_path": "res://art/b.png"},
+        {"source": "x.png", "target_path": "art/c.png"},
+    ]
+    async with Client(server) as client:
+        await client.call_tool("godot_enable_toolset", {"category": "asset_import"})
+        result = await client.call_tool(
+            "godot_asset_import_batch", {"items": items, "dry_run": True}
+        )
+    out = result.structured_content
+    assert out["dry_run"] is True
+    assert [r["ok"] for r in out["results"]] == [True, False, False]
+    assert "JPEG" in out["results"][1]["error"]
+    assert "res://" in out["results"][2]["error"]
+    assert out["imported_count"] == 0
+    assert "cmd_import_asset" not in _commands(conn)

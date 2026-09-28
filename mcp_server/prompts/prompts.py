@@ -65,6 +65,7 @@ def register_prompts(mcp: FastMCP, bridge: Bridge) -> list[str]:
         _register_author_resource(mcp),
         _register_export_build(mcp),
         _register_batch_refactor(mcp),
+        _register_asset_pipeline(mcp),
     ]
 
 
@@ -608,3 +609,59 @@ def _register_batch_refactor(mcp: FastMCP) -> str:
         ]
 
     return "batch_refactor"
+
+
+def _register_asset_pipeline(mcp: FastMCP) -> str:
+    @mcp.prompt(
+        name="asset_pipeline",
+        description=(
+            "Workflow for bringing a generated or external asset (image, audio, model) "
+            "into the project: import inline data, wait for the import, wire it to a "
+            "node, and verify visually."
+        ),
+    )
+    def asset_pipeline(
+        target_path: str = "res://art/generated.png",
+        node_path: str = "",
+        property: str = "texture",
+    ) -> list[Message]:
+        """Instruct the agent how to land a generated asset and wire it into a scene."""
+        node = node_path or "<the node that should use the asset, e.g. Player/Sprite2D>"
+        return [
+            Message(
+                role="user",
+                content=(
+                    f"Bring an asset into the project at '{target_path}' and use it on "
+                    f"{node}.\n\n"
+                    "Step 1 — Produce the asset with whatever tool you have (an image-"
+                    "generation MCP server, a file on disk, or a URL). godot-mcp does not "
+                    "generate it; it is the sink.\n\n"
+                    "Step 2 — Enable the toolset:\n"
+                    "  godot_enable_toolset('asset_import')\n\n"
+                    "Step 3 — Import it. A generator's base64 output goes in as a data URI; "
+                    "the bytes must match the target extension:\n"
+                    f"  godot_asset_import_asset(source='data:image/png;base64,<payload>', "
+                    f"target_path={_as_arg(target_path)}, wait_for_scan=True)\n"
+                    "  → A local path or an https:// URL works as 'source' too.\n"
+                    "  → Several files at once (e.g. a sprite set): "
+                    "godot_asset_import_batch(items=[{source, target_path}, ...], "
+                    "wait_for_scan=True) and check each results[].ok.\n\n"
+                    "Step 4 — Confirm the import finished:\n"
+                    "  → scan_complete must be true. If it is false, poll "
+                    f"godot_asset_import_get_status(target_path={_as_arg(target_path)}, "
+                    "wait_ms=5000) before using the file.\n\n"
+                    "Step 5 — Wire it to the node (a res:// path loads the resource):\n"
+                    f"  godot_scene_edit_set_node_property(node_path={_as_arg(node)}, "
+                    f"property={_as_arg(property)}, value={_as_arg(target_path)})\n"
+                    "  → For 3D textures, build a material instead: "
+                    "godot_asset_import_create_material_from_textures(albedo=...).\n\n"
+                    "Step 6 — Verify visually (vision-capable clients):\n"
+                    "  godot_enable_toolset('editor')\n"
+                    "  godot_editor_capture_screenshot()\n"
+                    "  → If it looks wrong (scale, filtering, alpha fringe), re-import with "
+                    "options={'overwrite': True, 'import_settings': {...}}."
+                ),
+            ),
+        ]
+
+    return "asset_pipeline"

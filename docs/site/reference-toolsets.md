@@ -8,7 +8,7 @@ updated: 2026-09-28
 
 # Toolsets & tools
 
-193 tools across 29 categories. Only `core` + `inspection` are enabled by default; enable the rest with `godot_enable_toolset(category)`. Class meanings: [safety classes](reference-safety-classes.md).
+194 tools across 29 categories. Only `core` + `inspection` are enabled by default; enable the rest with `godot_enable_toolset(category)`. Class meanings: [safety classes](reference-safety-classes.md).
 
 ## `analysis` — Static analysis: dependencies, signal flow, unused resources, circular deps, scene integrity.
 
@@ -43,11 +43,12 @@ updated: 2026-09-28
 
 ## `asset_import` — Import external assets (.png/.glb/.wav/…), create materials from textures, poll import status.
 
-3 tools.
+4 tools.
 
 | Tool | Class |
 |------|-------|
 | `godot_asset_import_asset` | mutating |
+| `godot_asset_import_batch` | mutating |
 | `godot_asset_import_create_material_from_textures` | mutating |
 | `godot_asset_import_get_status` | read_only |
 

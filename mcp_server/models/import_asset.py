@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -33,3 +35,33 @@ class ImportStatusResult(BaseModel):
     # Stable reason token while pending: ``rescan_in_flight`` when not yet
     # imported and the scan is running.
     reason: str | None = None
+
+
+class ImportBatchItem(BaseModel):
+    """One entry of ``godot_asset_import_batch`` — same fields as a single import."""
+
+    source: str
+    target_path: str
+    options: dict[str, Any] | None = None
+
+
+class ImportBatchItemResult(BaseModel):
+    index: int
+    target_path: str
+    ok: bool
+    detected_type: str | None = None
+    scan_complete: bool = False
+    loop_applied: bool = False
+    error: str | None = None
+
+
+class ImportBatchResult(BaseModel):
+    results: list[ImportBatchItemResult] = Field(default_factory=list)
+    ok_all: bool = False
+    imported_count: int = 0
+    failed_count: int = 0
+    dry_run: bool = False
+    # #461-style honesty: a stop_on_error halt is never silent.
+    aborted_at: int | None = None
+    skipped_count: int | None = None
+    hint: str | None = None

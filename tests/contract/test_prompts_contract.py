@@ -43,6 +43,7 @@ def test_prompts_are_registered(server: Any) -> None:
         "author_resource",
         "export_build",
         "batch_refactor",
+        "asset_pipeline",
     }
     names = asyncio.run(_get_prompt_names(server))
     assert expected <= names, f"Missing prompts: {expected - names}"
@@ -154,6 +155,27 @@ def test_export_build_prompt_parameterized(server: Any) -> None:
     assert "godot_enable_toolset('export')" in content
     assert "godot_export_list_presets" in content
     assert "godot_export_project" in content
+
+
+def test_asset_pipeline_prompt_parameterized(server: Any) -> None:
+    """asset_pipeline walks generate (any external tool) → inline import → wire → verify."""
+    result = asyncio.run(
+        _render_prompt(
+            server,
+            "asset_pipeline",
+            {"target_path": "res://art/hero.png", "node_path": "Player/Sprite2D"},
+        )
+    )
+    content = " ".join(str(m.content) for m in result.messages)
+    assert "res://art/hero.png" in content
+    assert "Player/Sprite2D" in content
+    assert "data:image/png;base64," in content
+    assert "godot_enable_toolset('asset_import')" in content
+    assert "godot_asset_import_asset" in content
+    assert "godot_asset_import_batch" in content
+    assert "wait_for_scan=True" in content
+    assert "godot_scene_edit_set_node_property" in content
+    assert "godot_editor_capture_screenshot" in content
 
 
 def test_batch_refactor_prompt_parameterized(server: Any) -> None:

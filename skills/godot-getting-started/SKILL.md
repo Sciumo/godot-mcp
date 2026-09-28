@@ -34,7 +34,7 @@ Quick map (all 28 gated toolsets):
 - **Scene building** — edit nodes/scenes/signals → `scene_edit` · macro edits in one round-trip → `composite` · extract a subtree into a reusable .tscn prefab (replace-with-instance) → `scene_edit_extract_scene` · 3D scenes (meshes, cameras, lights, GridMap) → `scene_3d` · UI themes → `theme_ui` · tilemaps → `tilemap` · particles → `particles` · navigation → `navigation` · physics → `physics` · animation → `animation` · audio buses → `audio` · shaders → `shader` · visual shader graphs → `visual_shader`
 - **Code & data** — GDScript files → `scripts` · C# files (read/list/write; `.cs` needs a build to be usable — check `godot_get_server_info().bridge.backend`) → `scripts` · resources (.tres) + autoloads → `resources_edit` · project files/settings/UIDs → `project` · move/rename a project file with dependency remap → `godot_project_move_file` · new project skeleton → `project_scaffold`
 - **Run & verify** — headless run + output capture → `runtime` · live play-test + input sim → `input` · input actions in project settings → `input_map` · automated assertions/screenshots → `testing` · breakpoints/stepping → `debugger` · performance monitors → `profiling`
-- **Bulk & ship** — batch/cross-scene ops → `batch` · static analysis → `analysis` · export presets → `export` · import external assets → `asset_import` · editor screenshots (vision clients) → `editor`
+- **Bulk & ship** — batch/cross-scene ops → `batch` · static analysis → `analysis` · export presets → `export` · import external assets (paths, URLs, or generator base64 as `data:` URIs; batch) → `asset_import` · editor screenshots (vision clients) → `editor`
 
 Always-on `core` extras: `godot_describe_class` (ClassDB metadata — check property/method names before setting), `godot_undo` (undo the last editor action), `godot_redo` (re-apply an undone action — `godot_list_history()` orients first), `godot_list_tools_by_safety_class()`, `godot_debug_workflow()` (diagnostics recipe), the toolset tools, and the two checks above.
 
@@ -51,7 +51,7 @@ Read results as ground truth, not decoration: batch results carry honesty flags 
 
 ## 4. Use the built-in workflow prompts
 
-The server ships step-by-step recipes as MCP prompts (slash commands like `/mcp__godot-mcp__build_scene`): `toolset_discovery`, `build_scene`, `play_test`, `script_edit`, `debug_scene`, `troubleshoot`, `author_resource`, `export_build`, `batch_refactor`. Reach for them, or use the companion skills `godot-playtest-and-debug` and `godot-expert`.
+The server ships step-by-step recipes as MCP prompts (slash commands like `/mcp__godot-mcp__build_scene`): `toolset_discovery`, `build_scene`, `play_test`, `script_edit`, `debug_scene`, `troubleshoot`, `author_resource`, `export_build`, `batch_refactor`, `asset_pipeline`. Reach for them, or use the companion skills `godot-playtest-and-debug` and `godot-expert`.
 
 ## When something fails
 

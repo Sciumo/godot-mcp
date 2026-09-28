@@ -1,7 +1,7 @@
 ---
 type: index
 title: "Prompts & resources"
-description: "The 9 workflow prompts and the godot:// read-only resources — the surfaces beyond tools."
+description: "The 10 workflow prompts and the godot:// read-only resources — the surfaces beyond tools."
 created: 2026-09-19
 updated: 2026-09-23
 ---
@@ -12,7 +12,7 @@ Beyond the 193 tools, the server exposes two more MCP surfaces: **prompts**
 (step-numbered workflow templates the agent renders for guidance) and
 **resources** (read-only `godot://` snapshots the host can fetch).
 
-## Workflow prompts (9)
+## Workflow prompts (10)
 
 Prompts are recipes, not actions: each one is a step-numbered template naming
 *which tools to call in what order*. Clients that surface prompts show them as
@@ -29,6 +29,7 @@ slash commands (e.g. `/mcp__godot-mcp__build_scene`). Render with
 | `troubleshoot` | Diagnostic playbook for common failures (bridge, toolsets, probe) | `godot_health_check`, `get_server_info`, `list_toolsets` |
 | `author_resource` | Author a resource (.tres/tileset) with the right toolset | `tilemap_create_tileset`, `add_tileset_atlas_source`, `create_tile` |
 | `export_build` | Ship a build: presets → export → verify | `export_list_presets`, `export_get_info`, `export_project` |
+| `asset_pipeline` | Land a generated/external asset: inline import → wait → wire → screenshot | `asset_import_asset`, `asset_import_batch`, `scene_edit_set_node_property`, `editor_capture_screenshot` |
 | `batch_refactor` | Safe bulk property changes: find → preview → apply | `batch_find_nodes_by_type`, `batch_set_property`, `cross_scene_set_property` |
 
 Every prompt composes from the shared toolset-protocol text (single source of

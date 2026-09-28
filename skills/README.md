@@ -10,7 +10,7 @@ building Godot games through the MCP tools. Two categories:
   authoring).
 
 The skills document the surface as of **2026.09.28** (193 tools across
-29 categories, 9 workflow prompts). `godot-getting-started` teaches how to
+29 categories, 10 workflow prompts). `godot-getting-started` teaches how to
 check the live server version (`godot_health_check`) — if the server you're
 driving is older or newer, trust `godot_get_server_info()`'s inventory over
 the counts here.

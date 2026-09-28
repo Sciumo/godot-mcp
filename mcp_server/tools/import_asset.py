@@ -1,8 +1,9 @@
 """External asset import tools (issue #108).
 
-Generic drop-in for external files (local paths or HTTP URLs) and PBR material
-assembly. This is the open-source foundation for external AI content pipelines
-(e.g. Meshy, Tripo) without hard-coding provider-specific logic.
+Generic drop-in for external files (local paths, HTTP URLs, or inline
+``data:`` URIs) and PBR material assembly. This is the open-source foundation
+for external AI content pipelines (e.g. Meshy, Tripo) without hard-coding
+provider-specific logic.
 
 Gated ``asset_import`` toolset.
 """
@@ -10,6 +11,8 @@ Gated ``asset_import`` toolset.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import os
 import tempfile
 from pathlib import Path
@@ -25,6 +28,9 @@ from mcp_server.constraints import TimeoutMs
 from mcp_server.models.import_asset import (
     CreateMaterialResult,
     ImportAssetResult,
+    ImportBatchItem,
+    ImportBatchItemResult,
+    ImportBatchResult,
     ImportStatusResult,
 )
 from mcp_server.safety import MUTATING, READ_ONLY
@@ -147,6 +153,131 @@ async def _download_url(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Inline data sources — AI image/audio/model generators return base64 blobs,
+# so a ``data:<mime>;base64,<payload>`` source is decoded to a temp file and
+# then follows the same path as a download.
+# ---------------------------------------------------------------------------
+
+_MAX_INLINE_BYTES = 32 * 1024 * 1024
+
+# Leading-byte signatures, used both to verify a payload matches its target
+# extension and to name what it actually is when it does not.
+_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("PNG", (".png",)),
+    ("JPEG", (".jpg", ".jpeg")),
+    ("WebP", (".webp",)),
+    ("WAV", (".wav",)),
+    ("Ogg", (".ogg",)),
+    ("MP3", (".mp3",)),
+    ("GLB", (".glb",)),
+    ("SVG", (".svg",)),
+)
+
+
+def _sniff(data: bytes) -> str | None:
+    """Name the payload's format from its leading bytes, or ``None`` if unknown."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "PNG"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "JPEG"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "WebP"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "WAV"
+    if data.startswith(b"OggS"):
+        return "Ogg"
+    if data.startswith(b"ID3") or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "MP3"
+    if data.startswith(b"glTF"):
+        return "GLB"
+    if b"<svg" in data[:1024]:
+        return "SVG"
+    return None
+
+
+def _is_data_uri(source: str) -> bool:
+    return source.startswith("data:")
+
+
+def _decode_data_uri(source: str, target_path: str) -> bytes:
+    """Decode and validate a ``data:`` URI against ``target_path``'s extension.
+
+    Pure (no filesystem), so dry-runs get the same validation as real runs.
+    """
+    header, sep, payload = source.partition(",")
+    if not sep or not header.endswith(";base64"):
+        raise ToolError(
+            "VALIDATION_ERROR: inline sources must be base64 data URIs "
+            "('data:<mime>;base64,<payload>')."
+        )
+    # 4 base64 chars encode 3 bytes — reject before decoding a huge payload.
+    if len(payload) * 3 // 4 > _MAX_INLINE_BYTES:
+        raise ToolError(
+            f"VALIDATION_ERROR: inline payload too large (limit {_MAX_INLINE_BYTES} bytes); "
+            "write it to disk or serve it over HTTP and pass that as 'source' instead."
+        )
+    try:
+        data = base64.b64decode("".join(payload.split()), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ToolError(f"VALIDATION_ERROR: data URI payload is not valid base64: {exc}.") from exc
+    if len(data) > _MAX_INLINE_BYTES:
+        raise ToolError(
+            f"VALIDATION_ERROR: inline payload too large ({len(data)} bytes, limit "
+            f"{_MAX_INLINE_BYTES})."
+        )
+    ext = Path(target_path).suffix.lower()
+    expected = next((name for name, exts in _SIGNATURES if ext in exts), None)
+    actual = _sniff(data)
+    if expected is not None and actual != expected:
+        raise ToolError(
+            f"VALIDATION_ERROR: payload for '{target_path}' is not {expected} "
+            f"(looks like {actual or 'unknown data'}); fix the extension or the source."
+        )
+    return data
+
+
+def _write_temp(data: bytes, target_path: str) -> str:
+    fd, tmp_path = tempfile.mkstemp(suffix=Path(target_path).suffix or ".tmp")
+    with os.fdopen(fd, "wb") as tmp:
+        tmp.write(data)
+    return tmp_path
+
+
+def _validate_source(source: str, target_path: str) -> None:
+    """Checks shared by the real run and the dry-run (no network, no writes)."""
+    _require_res_path(target_path)
+    if _is_data_uri(source):
+        _decode_data_uri(source, target_path)
+
+
+async def _import_one(
+    bridge: Bridge, source: str, target_path: str, options: dict[str, Any]
+) -> dict[str, Any]:
+    """Materialize ``source`` locally, hand it to ``cmd_import_asset``, clean up."""
+    _validate_source(source, target_path)
+    local_source = source
+    temp_path: str | None = None
+    if _is_data_uri(source):
+        temp_path = _write_temp(_decode_data_uri(source, target_path), target_path)
+        local_source = temp_path
+    elif _is_url(source):
+        temp_path = await _download_url(source)
+        local_source = temp_path
+
+    params: dict[str, Any] = {
+        "source": local_source,
+        "target_path": target_path,
+        "overwrite": options.get("overwrite", False),
+        "import_settings": options.get("import_settings", {}),
+    }
+    try:
+        return await route(bridge, "cmd_import_asset", params)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+# ---------------------------------------------------------------------------
 # Public tool registration
 # ---------------------------------------------------------------------------
 
@@ -190,7 +321,10 @@ def register_import_asset(mcp: FastMCP, bridge: Bridge) -> None:
     ) -> ImportAssetResult:
         """Bring an external file into the Godot project.
 
-        ``source`` may be a local filesystem path or an HTTP(S) URL.  The file is
+        ``source`` may be a local filesystem path, an HTTP(S) URL, or an inline
+        ``data:<mime>;base64,<payload>`` URI (e.g. an image returned by an
+        AI image generator; max 32 MiB decoded, and the bytes must match the
+        ``target_path`` extension — checked on dry-runs too). The file is
         copied into ``target_path`` (``res://…``) and the editor filesystem is
         updated so Godot imports it on the next scan.
 
@@ -208,7 +342,7 @@ def register_import_asset(mcp: FastMCP, bridge: Bridge) -> None:
         sidecar (up to ``timeout_ms``); ``scan_complete`` in the result reports
         whether the import artifacts are ready (vs just the copy landing).
         """
-        _require_res_path(target_path)
+        _validate_source(source, target_path)
         options = options or {}
         detected_type = _detect_type(target_path)
 
@@ -221,23 +355,7 @@ def register_import_asset(mcp: FastMCP, bridge: Bridge) -> None:
         if dry_run:
             return preview
 
-        local_source = source
-        downloaded_tmp: str | None = None
-        if _is_url(source):
-            downloaded_tmp = await _download_url(source)
-            local_source = downloaded_tmp
-
-        params: dict[str, Any] = {
-            "source": local_source,
-            "target_path": target_path,
-            "overwrite": options.get("overwrite", False),
-            "import_settings": options.get("import_settings", {}),
-        }
-        try:
-            result = await route(bridge, "cmd_import_asset", params)
-        finally:
-            if downloaded_tmp and os.path.exists(downloaded_tmp):
-                os.unlink(downloaded_tmp)
+        result = await _import_one(bridge, source, target_path, options)
         scan_complete = False
         if wait_for_scan and result.get("imported", True):
             scan_complete = await _poll_import_ready(bridge, target_path, timeout_ms) is not None
@@ -249,6 +367,88 @@ def register_import_asset(mcp: FastMCP, bridge: Bridge) -> None:
             scan_complete=scan_complete,
             # #418: the .wav loop config landed in the .import sidecar + reimport.
             loop_applied=result.get("loop_applied", False),
+        )
+
+    @mcp.tool(meta=MUTATING, tags=ASSET_IMPORT)
+    async def import_batch(
+        items: Annotated[list[ImportBatchItem], Field(min_length=1, max_length=100)],
+        stop_on_error: bool = False,
+        dry_run: bool = False,
+        wait_for_scan: bool = False,
+        timeout_ms: TimeoutMs = _SCAN_TIMEOUT_MS_DEFAULT,
+    ) -> ImportBatchResult:
+        """Import many files in one call — e.g. a set of AI-generated sprites.
+
+        Each item takes the same ``source`` / ``target_path`` / ``options`` as
+        ``godot_asset_import_asset`` (path, URL, or ``data:`` URI). Items run in
+        order; each gets its own ``ok``/``error`` in ``results``. With
+        ``stop_on_error=True`` the first failure halts the batch and the result
+        carries ``aborted_at``, ``skipped_count`` and a ``hint``. ``dry_run``
+        validates every item (path, payload decode and type check) without
+        importing. ``wait_for_scan`` polls each imported item's ``.import``
+        sidecar, sharing one ``timeout_ms`` budget across the batch.
+        """
+        results: list[ImportBatchItemResult] = []
+        aborted_at: int | None = None
+        for index, item in enumerate(items):
+            detected_type = _detect_type(item.target_path)
+            try:
+                if dry_run:
+                    _validate_source(item.source, item.target_path)
+                    out: dict[str, Any] = {}
+                else:
+                    out = await _import_one(
+                        bridge, item.source, item.target_path, item.options or {}
+                    )
+            except ToolError as exc:
+                results.append(
+                    ImportBatchItemResult(
+                        index=index,
+                        target_path=item.target_path,
+                        ok=False,
+                        detected_type=detected_type,
+                        error=str(exc),
+                    )
+                )
+                if stop_on_error:
+                    aborted_at = index
+                    break
+                continue
+            results.append(
+                ImportBatchItemResult(
+                    index=index,
+                    target_path=out.get("target_path", item.target_path),
+                    ok=True,
+                    detected_type=out.get("detected_type") or detected_type,
+                    loop_applied=out.get("loop_applied", False),
+                )
+            )
+
+        if wait_for_scan and not dry_run:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout_ms / 1000.0
+            for r in results:
+                if r.ok:
+                    remaining_ms = max(0, int((deadline - loop.time()) * 1000))
+                    ready = await _poll_import_ready(bridge, r.target_path, remaining_ms)
+                    r.scan_complete = ready is not None
+
+        failed = sum(1 for r in results if not r.ok)
+        skipped = len(items) - len(results) if aborted_at is not None else None
+        return ImportBatchResult(
+            results=results,
+            ok_all=failed == 0 and aborted_at is None,
+            imported_count=0 if dry_run else len(results) - failed,
+            failed_count=failed,
+            dry_run=dry_run,
+            aborted_at=aborted_at,
+            skipped_count=skipped,
+            hint=(
+                f"Stopped at item {aborted_at}; {skipped} item(s) were not attempted. "
+                "Fix that item and resubmit the remainder."
+                if aborted_at is not None
+                else None
+            ),
         )
 
     @mcp.tool(meta=MUTATING, tags=ASSET_IMPORT)
