@@ -170,8 +170,8 @@ def create_server(
     # tools marked ``task=True`` can return a handle immediately instead of
     # holding the MCP request open for the whole bridge op. Three long-running
     # tools are task-enabled (run_and_capture, export_project, bake_navigation_mesh);
-    # their ctx.info/ctx.report_progress calls use safe_info/safe_progress
-    # (tools/_progress.py) to no-op in the detached task session.
+    # their ctx.report_progress calls use safe_progress (tools/_progress.py)
+    # to no-op in the detached task session.
     mcp.add_extension(TasksExtension())
 
     register_health(mcp, bridge, config)

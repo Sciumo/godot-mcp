@@ -28,7 +28,7 @@ from mcp_server.models.navigation import (
 )
 from mcp_server.safety import MUTATING, READ_ONLY, enforce_preconditions, require_node_exists
 from mcp_server.tools._persistence import node_probe
-from mcp_server.tools._progress import safe_info, safe_progress
+from mcp_server.tools._progress import safe_progress
 from mcp_server.tools._route import route, run_or_preview
 
 NAVIGATION = {NAVIGATION_TAG}
@@ -112,8 +112,7 @@ def register_navigation(mcp: FastMCP, bridge: Bridge) -> None:
         params = {"node_path": node_path}
         preview = {"node_path": node_path, "baked": False}
         if not dry_run:
-            await safe_info(ctx, f"Baking navigation mesh for {node_path}…")
-            await safe_progress(ctx, 0, 1)
+            await safe_progress(ctx, 0, 1, f"Baking navigation mesh for {node_path}…")
         result = await run_or_preview(
             dry_run,
             BakeNavigationResult,
@@ -124,8 +123,7 @@ def register_navigation(mcp: FastMCP, bridge: Bridge) -> None:
             persistence_probe=node_probe(node_path),
         )
         if not dry_run:
-            await safe_progress(ctx, 1, 1)
-            await safe_info(ctx, f"Navigation bake finished for {node_path}")
+            await safe_progress(ctx, 1, 1, f"Navigation bake finished for {node_path}")
         return result
 
     @mcp.tool(meta=MUTATING, tags=NAVIGATION)

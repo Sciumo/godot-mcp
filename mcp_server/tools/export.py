@@ -27,7 +27,7 @@ from mcp_server.safety import (
     enforce_preconditions,
     require_godot_binary,
 )
-from mcp_server.tools._progress import safe_info, safe_progress
+from mcp_server.tools._progress import safe_progress
 from mcp_server.tools._route import route
 
 EXPORT = {EXPORT_TAG}
@@ -71,16 +71,18 @@ def register_export(mcp: FastMCP, bridge: Bridge, config: ServerConfig, runner: 
         if preset not in names:
             raise ToolError(f"No export preset named '{preset}'. Available: {names}.")
         project_dir = await resolve_project_dir(bridge, config)
-        await safe_info(
+        await safe_progress(
             ctx,
+            0,
+            1,
             f"Exporting preset '{preset}' → {output_path} (timeout {timeout_seconds:g}s)…",
         )
-        await safe_progress(ctx, 0, 1)
         run = await runner.export(project_dir, preset, output_path, debug, float(timeout_seconds))
-        await safe_progress(ctx, 1, 1)
         summary = summarize_run(run)
-        await safe_info(
+        await safe_progress(
             ctx,
+            1,
+            1,
             f"Export finished: exit={summary.exit_code}, "
             f"{len(summary.errors)} error(s), {len(summary.warnings)} warning(s)",
         )

@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-import pytest
 from fastmcp import Client, FastMCP
 
 from mcp_server.bridge import Bridge
@@ -13,8 +12,6 @@ from mcp_server.config import ServerConfig
 from mcp_server.models.envelope import CommandEnvelope, ResponseEnvelope
 from mcp_server.server import create_server
 from tests.fakes import FakeAddonConnection, connector_for
-
-pytestmark = pytest.mark.asyncio
 
 # 1x1 red PNG.
 _PNG_B64 = (

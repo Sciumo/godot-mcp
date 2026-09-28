@@ -1,8 +1,11 @@
-"""Contract test: long-running tools stream progress + logs via Context (issue #223).
+"""Contract test: long-running tools stream progress via Context (issue #223).
 
 run_tests / run_and_capture / export_project are multi-second operations. They must
-accept a FastMCP ``Context`` and emit progress updates and structured log messages so
-the client/agent has observability during the slow call.
+accept a FastMCP ``Context`` and emit progress updates so the client/agent has
+observability during the slow call. The human-readable status text rides on the
+progress notification's ``message`` field: the MCP logging capability
+(``notifications/message``) is deprecated as of the 2026-07-28 protocol (SEP-2577),
+so tools must not send log messages.
 """
 
 from __future__ import annotations
@@ -66,11 +69,11 @@ async def test_run_tests_streams_progress_and_logs(tmp_path: Path) -> None:
     _with_gut(tmp_path)
     server = _build(str(tmp_path), RunOutput(command=["gut"], stdout=_GUT_PASS, exit_code=0))
 
-    progress: list[tuple[float, float | None]] = []
+    progress: list[tuple[float, float | None, str | None]] = []
     logs: list[str] = []
 
     async def on_progress(p: float, total: float | None, message: str | None) -> None:
-        progress.append((p, total))
+        progress.append((p, total, message))
 
     async def on_log(params: LoggingMessageNotificationParams) -> None:
         logs.append(str(params.data))
@@ -80,29 +83,43 @@ async def test_run_tests_streams_progress_and_logs(tmp_path: Path) -> None:
         await client.call_tool("godot_testing_run_tests", {"test_dir": "res://test"})
 
     assert progress, "expected at least one progress update from run_tests"
-    assert logs, "expected at least one structured log message from run_tests"
+    messages = [m for _, _, m in progress if m]
+    assert any("Running GUT suite" in m for m in messages), messages
+    assert any("3 passed" in m for m in messages), messages
+    assert not logs, f"deprecated logging capability used (SEP-2577): {logs}"
+
+
+def test_no_tool_uses_the_deprecated_logging_capability() -> None:
+    """Server code must not call Context log methods (SEP-2577 deprecation)."""
+    import re
+
+    root = Path(__file__).resolve().parents[2] / "mcp_server"
+    pattern = re.compile(r"\bctx\.(log|debug|info|warning|error)\(")
+    offenders = [
+        f"{path.relative_to(root)}:{n}"
+        for path in root.rglob("*.py")
+        for n, line in enumerate(path.read_text().splitlines(), 1)
+        if pattern.search(line)
+    ]
+    assert not offenders, offenders
 
 
 async def test_safe_progress_noops_on_session_unavailable() -> None:
     """The guarded progress helpers swallow RuntimeError (detached task session).
 
     Simulates the ``task=True`` detached-session failure by passing a Context
-    whose ``info``/``report_progress`` raise ``RuntimeError: session is not
+    whose ``report_progress`` raises ``RuntimeError: session is not
     available``. The tools must complete successfully — the progress calls
     no-op instead of propagating the error.
     """
-    from mcp_server.tools._progress import safe_info, safe_progress
+    from mcp_server.tools._progress import safe_progress
 
     class _BrokenCtx:
-        async def info(self, msg: str, *args: object, **kwargs: object) -> None:
-            raise RuntimeError("session is not available")
-
         async def report_progress(
             self, current: float, total: float, *args: object, **kwargs: object
         ) -> None:
             raise RuntimeError("session is not available")
 
     ctx = _BrokenCtx()
-    await safe_info(ctx, "should not raise")
-    await safe_progress(ctx, 0, 1)
+    await safe_progress(ctx, 0, 1, "should not raise")
     await safe_progress(ctx, 1, 1)

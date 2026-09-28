@@ -23,7 +23,7 @@ from mcp_server.safety import (
     enforce_preconditions,
     require_godot_binary,
 )
-from mcp_server.tools._progress import safe_info, safe_progress
+from mcp_server.tools._progress import safe_progress
 
 
 def register_runtime(mcp: FastMCP, bridge: Bridge, config: ServerConfig, runner: Runner) -> None:
@@ -49,15 +49,15 @@ def register_runtime(mcp: FastMCP, bridge: Bridge, config: ServerConfig, runner:
         """
         require_godot_binary(runner.binary)
         project_dir = await resolve_project_dir(bridge, config)
-        await safe_info(
-            ctx, f"Running {scene or 'main scene'} headless (timeout {timeout_seconds:g}s)…"
+        await safe_progress(
+            ctx, 0, 1, f"Running {scene or 'main scene'} headless (timeout {timeout_seconds:g}s)…"
         )
-        await safe_progress(ctx, 0, 1)
         output = await runner.run(project_dir, scene, float(timeout_seconds))
-        await safe_progress(ctx, 1, 1)
         result = summarize_run(output)
-        await safe_info(
+        await safe_progress(
             ctx,
+            1,
+            1,
             f"Run finished: exit={result.exit_code}, "
             f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)",
         )

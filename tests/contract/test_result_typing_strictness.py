@@ -37,8 +37,6 @@ from mcp_server.server import create_server
 from tests.contract.test_describe_class import NODE2D, _class_responder
 from tests.fakes import FakeAddonConnection, connector_for
 
-pytestmark = pytest.mark.asyncio
-
 READ_REPLY = {
     "ready": True,
     "node_path": "/root/Scene/Body",

@@ -34,7 +34,7 @@ removed per-session isolation as dead code on the sessionless protocol.
 |---|---|---|---|
 | Toolset enable/disable | `ToolsetMiddleware` (`toolset_middleware.py`) | **None** — single server-global enabled set (#364) | 2026-native |
 | Destructive-tool approval guard | `ApprovalMiddleware` (`approval_middleware.py`) | **None** — `InputRequiredResult` + `request_state` round-trip, "durable, no server-side state" (#346) | 2026-native (handles pattern) |
-| `ctx.info` / `ctx.report_progress` | `tools/_progress.py` `safe_info` / `safe_progress` | **None** — guarded no-op in the detached task session (`task=True`, #331) | 2026-tolerant |
+| `ctx.report_progress` (status text in `message`) | `tools/_progress.py` `safe_progress` | **None** — guarded no-op in the detached task session (`task=True`, #331). `ctx.info` is no longer used: the logging capability is deprecated (SEP-2577) | 2026-tolerant |
 | Bridge request/response correlation | `bridge.py` (`id` → waiter) | **None** — envelope `id` correlation, concurrency-safe | Protocol-agnostic |
 | ReadCache / `gather_reads` | `harness.py` | Client process state — not server state; client decides scoping | N/A (client-side) |
 
@@ -83,7 +83,7 @@ and simpler** than the spec's per-consumer handles:
 | **Silent gating bypass in sessionless clients** (the issue's named risk) | **Eliminated by #364's design.** With server-global state there is no affinity scope to lose: a stateless client that enables in call N sees the grant in call N+1 even across reconnects. The no-op bypass existed only under `session_id` keying. |
 | Concurrent multi-client interference | Accepted: single-user server, documented. A long-lived client A enabling a toolset changes what client B sees in `list_tools` — that is the design. If godot-mcp ever grows multi-tenant, the handle design becomes mandatory; until then the global set keeps the surface honest. |
 | FastMCP removes session-era APIs we still touch | Low: the server relies on no session APIs (see §2). The migration surface is FastMCP's, not ours. |
-| `task=True` detached sessions (`ctx.session is None`) | Handled by `safe_info`/`safe_progress` guards (#331) and the guard-pattern rule in `.opencode/rules/async-patterns.md` (no `ctx.elicit()`, no `Middleware.on_initialize`). |
+| `task=True` detached sessions (`ctx.session is None`) | Handled by the `safe_progress` guard (#331) and the guard-pattern rule in `.opencode/rules/async-patterns.md` (no `ctx.elicit()`, no `Middleware.on_initialize`). |
 
 ## 4. FastMCP dependency
 
