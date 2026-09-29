@@ -193,11 +193,14 @@ func set_selected_node(node_name: String) -> void:
 	_selected_value.text = node_name if not node_name.is_empty() else PLACEHOLDER
 
 
-func set_enabled_toolsets(toolsets: PackedStringArray) -> void:
+## `available` > 0 appends "(N of M)" so the row also says how many exist.
+func set_enabled_toolsets(toolsets: PackedStringArray, available: int = 0) -> void:
 	if toolsets.is_empty():
 		_toolsets_value.text = PLACEHOLDER
 	else:
 		_toolsets_value.text = ", ".join(toolsets)
+	if available > 0:
+		_toolsets_value.text += " (%d of %d)" % [toolsets.size(), available]
 
 
 func set_command_stats(count: int, last_exec_ms: float) -> void:

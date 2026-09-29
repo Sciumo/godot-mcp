@@ -63,6 +63,9 @@ var _instances: Array = []
 ## The server's package version, learned from cmd_server_hello (issue #521) and
 ## surfaced here so the plugin entry can label the dock "godot-mcp <ver> / Godot".
 var server_version := ""
+## Every toolset the server offers, as ``{name, enabled}`` dictionaries, from
+## the same hello (empty until a server that sends them connects).
+var server_toolsets: Array = []
 # The EditorDebuggerPlugin that captures a played game's godot_mcp channel (issue #66).
 # Set by the plugin entry; null in headless/unit contexts where there is no editor.
 var _debugger: Object = null
@@ -395,8 +398,15 @@ func _cmd_get_addon_info(_params: Dictionary) -> Dictionary:
 ## so the plugin entry can label the dock "godot-mcp <ver> / Godot <x.y.z>".
 ## The server sends this fire-and-forget right after cmd_get_addon_info; the
 ## response envelope is ignored there (the addon needs no reply).
+##
+## Since the status bar: the hello also carries ``toolsets`` — every toolset the
+## server offers as ``{name, enabled}`` — re-sent on connect and on each toolset
+## change, so the editor shows what the agent can reach. Absent from older
+## servers; kept as-is then.
 func _cmd_server_hello(params: Dictionary) -> Dictionary:
 	server_version = str(params.get("version", ""))
+	if params.get("toolsets") is Array:
+		server_toolsets = (params["toolsets"] as Array).duplicate(true)
 	return _ok({"received": true})
 
 

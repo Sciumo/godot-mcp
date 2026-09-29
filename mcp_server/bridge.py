@@ -157,6 +157,11 @@ class Bridge:
         # #563: the inbound message cap handed to the real listener (the injected
         # test ``serve`` ignores it — fakes have no transport limits to drop a frame).
         self._max_inbound_message_bytes = self._config.max_inbound_message_bytes
+        # What cmd_server_hello tells the editor beyond the version: wired by the
+        # server to the toolset registry so the addon can show every available
+        # toolset and which are enabled. None (tests, bare bridges) = version only.
+        self._state_provider: Callable[[], dict[str, Any]] | None = None
+        self._push_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def connected(self) -> bool:
@@ -188,6 +193,33 @@ class Bridge:
             extra={"project_path": str((identity or {}).get("project_path", ""))},
         )
 
+    def set_state_provider(self, provider: Callable[[], dict[str, Any]] | None) -> None:
+        """Supply the server state the editor is told about (toolsets); see push_state."""
+        self._state_provider = provider
+
+    def _hello_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = {"version": __version__}
+        if self._state_provider is not None:
+            params.update(self._state_provider())
+        return params
+
+    async def push_state(self) -> None:
+        """Tell the connected editor the server version and toolset state.
+
+        Sent as ``cmd_server_hello`` (issue #521's version push, extended with
+        ``toolsets``) on every peer adoption and after each toolset change, so the
+        addon's dock/status bar always shows what the agent can reach. Best-effort:
+        no peer, or an older addon that ignores the extra fields, is not an error.
+        """
+        if self._conn is None:
+            return
+        await self.send("cmd_server_hello", self._hello_params(), timeout=5.0)
+
+    def _schedule_push_state(self) -> None:
+        task = asyncio.create_task(self.push_state())
+        self._push_tasks.add(task)
+        task.add_done_callback(self._push_tasks.discard)
+
     async def addon_info(self) -> dict[str, Any] | None:
         """The connected addon's self-description (issue #530), or None.
 
@@ -217,9 +249,7 @@ class Bridge:
                         # Best-effort push (issue #521): an old addon that lacks
                         # cmd_server_hello answers "Unknown command" — ignored
                         # here, the dock just keeps showing the Godot version.
-                        await self.send(
-                            "cmd_server_hello", {"version": __version__}, timeout=5.0
-                        )
+                        await self.send("cmd_server_hello", self._hello_params(), timeout=5.0)
         return self._addon_info
 
     async def serve(self) -> None:
@@ -311,6 +341,10 @@ class Bridge:
             self._resolve(raw if isinstance(raw, str) else raw.decode("utf-8"))
         self._reader = asyncio.create_task(self._read_loop(conn))
         logger.debug("bridge peer connected")
+        # Only when a provider is wired (the real server): a new editor learns the
+        # version + toolsets immediately instead of on the first lazy handshake.
+        if self._state_provider is not None:
+            self._schedule_push_state()
 
     async def _auth_check(self, conn: Connection) -> tuple[bool, list[str | bytes]]:
         """Require + verify the peer's auth envelope before adoption (issue #538).

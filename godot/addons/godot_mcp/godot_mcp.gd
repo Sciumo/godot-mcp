@@ -37,6 +37,7 @@ var _router: MCPCommandRouter
 var _selection: EditorSelection
 var _refresh_timer: Timer
 var _server_version := ""
+var _server_toolsets: Array = []
 # Opt-in filesystem auto-refresh (issue #561): the timer fires AutoRefreshHelper.tick
 # so external edits (agent/git/other tools) are picked up without editor focus.
 # Off by default (env var or dock toggle); the env value seeds the checkbox.
@@ -219,6 +220,15 @@ func _on_refresh_timer() -> void:
 		_server_version = _router.server_version
 		_dock.set_server_version(_server_version_label())
 		_status_bar.set_server_version(_server_version_label())
+	# Toolsets ride the same hello (re-sent on connect and every toggle).
+	if _router != null and _router.server_toolsets != _server_toolsets:
+		_server_toolsets = _router.server_toolsets.duplicate(true)
+		var enabled := PackedStringArray()
+		for t: Variant in _server_toolsets:
+			if t is Dictionary and bool((t as Dictionary).get("enabled", false)):
+				enabled.append(str((t as Dictionary).get("name", "")))
+		_dock.set_enabled_toolsets(enabled, _server_toolsets.size())
+		_status_bar.set_toolsets(enabled, _server_toolsets.size())
 
 
 ## The auto-refresh timer tick (issue #561): the decision lives in MCPAutoRefresh

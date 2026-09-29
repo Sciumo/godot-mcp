@@ -111,7 +111,10 @@ def _build() -> tuple[FastMCP, FakeAddonConnection]:
 
 
 def _commands(conn: FakeAddonConnection) -> list[str]:
-    return [CommandEnvelope.model_validate_json(s).command for s in conn.sent]
+    """Commands the tools sent, minus the server's state pushes to the editor
+    (cmd_server_hello on connect and on every toolset toggle)."""
+    sent = [CommandEnvelope.model_validate_json(s).command for s in conn.sent]
+    return [c for c in sent if c != "cmd_server_hello"]
 
 
 async def test_gated_in_asset_import_toolset() -> None:

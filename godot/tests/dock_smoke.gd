@@ -50,6 +50,8 @@ func _initialize() -> void:
 	# Empty toolsets shows placeholder
 	dock.set_enabled_toolsets(PackedStringArray())
 	_expect(failures, "toolsets_empty", dock.displayed_toolsets(), "(none)")
+	dock.set_enabled_toolsets(PackedStringArray(["core", "inspection"]), 29)
+	_expect(failures, "toolsets_of_available", dock.displayed_toolsets(), "core, inspection (2 of 29)")
 
 	# === Command statistics: total, last exec (#520: no latency field — the
 	# addon can only measure handler-exec time honestly) ===
@@ -160,6 +162,11 @@ func _check_status_bar(failures: Array[String]) -> void:
 	bar.record_command("cmd_ping", 0.2, 5, 5)
 	_expect(failures, "bar_totals_2", bar.displayed_totals(), "2 · ~1.2k tok")
 	_expect(failures, "bar_total_tokens", str(bar.total_tokens()), "1210")
+	if not bar.tooltip_text.contains("not reported by the server yet"):
+		failures.append("bar_tooltip_toolsets_unknown: %s" % bar.tooltip_text)
+	bar.set_toolsets(PackedStringArray(["core", "inspection", "editor"]), 29)
+	if not bar.tooltip_text.contains("Toolsets: 3 of 29 enabled: core, inspection, editor"):
+		failures.append("bar_tooltip_toolsets: %s" % bar.tooltip_text)
 	if not bar.tooltip_text.contains("editor-bridge traffic only"):
 		failures.append("bar_tooltip: missing the estimate caveat")
 

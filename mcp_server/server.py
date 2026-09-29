@@ -220,6 +220,7 @@ def create_server(
 
     # Gate the tool surface by category (per-session via the middleware above).
     manager = ToolsetManager(mcp, bridge=bridge, middleware=toolset_mw)
+    bridge.set_state_provider(manager.editor_state)
     register_toolset_tools(mcp, manager)
 
     # Comprehensive diagnostics: toolset counts, bridge state, troubleshooting.

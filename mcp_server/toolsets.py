@@ -203,6 +203,7 @@ class ToolsetManager:
             enabled = self._middleware.enabled()
             enabled.add(category)
             self._middleware.set_enabled(enabled)
+        await self._push_to_editor()
         return self._info(category)
 
     async def disable(self, category: str, *, ctx: Any = None) -> ToolsetInfo:
@@ -211,7 +212,19 @@ class ToolsetManager:
             enabled = self._middleware.enabled()
             enabled.discard(category)
             self._middleware.set_enabled(enabled)
+        await self._push_to_editor()
         return self._info(category)
+
+    def editor_state(self) -> dict[str, Any]:
+        """The toolset half of ``cmd_server_hello``: every toolset (core first)
+        with its enabled flag, for the addon's dock and status bar."""
+        return {"toolsets": [{"name": t.name, "enabled": t.enabled} for t in self.status()]}
+
+    async def _push_to_editor(self) -> None:
+        # Best-effort mirror of the new surface into the editor UI; the toggle
+        # itself already applied, and push_state never raises on a dead peer.
+        if self._bridge is not None:
+            await self._bridge.push_state()
 
     def status(self, *, ctx: Any = None) -> list[ToolsetInfo]:
         if self._middleware is not None:

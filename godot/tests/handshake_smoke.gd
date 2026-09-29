@@ -71,6 +71,19 @@ func _initialize() -> void:
 		failures.append("cmd_server_hello not ok: %s" % str(hello))
 	if router.server_version != "2026.09.20":
 		failures.append("server_version not stored from the hello push: %s" % router.server_version)
+	# A version-only hello (older server) leaves toolsets empty...
+	if not router.server_toolsets.is_empty():
+		failures.append("server_toolsets not empty before a toolsets hello: %s" % str(router.server_toolsets))
+	# ...and a hello with toolsets (sent on connect and every toggle) stores them.
+	router.handle({
+		"id": "3",
+		"command": "cmd_server_hello",
+		"params": {"version": "2026.09.20", "toolsets": [
+			{"name": "core", "enabled": true}, {"name": "editor", "enabled": false},
+		]},
+	})
+	if router.server_toolsets.size() != 2 or str((router.server_toolsets[1] as Dictionary).get("name")) != "editor":
+		failures.append("server_toolsets not stored from the hello push: %s" % str(router.server_toolsets))
 
 	router = null
 

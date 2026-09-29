@@ -23,6 +23,8 @@ var _totals_label: Label
 
 var _status: MCPStatusDock.ConnectionStatus = MCPStatusDock.ConnectionStatus.DISCONNECTED
 var _server_version := ""
+var _enabled_toolsets := PackedStringArray()
+var _available_toolsets := 0
 var _command_count := 0
 var _request_tokens := 0
 var _response_tokens := 0
@@ -87,6 +89,12 @@ func set_server_version(version: String) -> void:
 	_refresh()
 
 
+func set_toolsets(enabled: PackedStringArray, available: int) -> void:
+	_enabled_toolsets = enabled
+	_available_toolsets = available
+	_refresh()
+
+
 ## One command crossed the bridge: count it, show it, and flash the dot.
 func record_command(command: String, exec_ms: float, request_tokens: int, response_tokens: int) -> void:
 	_command_count += 1
@@ -121,6 +129,7 @@ func _refresh() -> void:
 	tooltip_text = "\n".join(PackedStringArray([
 		"godot-mcp: %s" % MCPStatusDock.connection_text(_status),
 		"Server: %s" % (_server_version if not _server_version.is_empty() else "(unknown)"),
+		_toolsets_line(),
 		"Last: %s%s" % [_last_entry if not _last_entry.is_empty() else "(none)", " at %s" % _last_time if not _last_time.is_empty() else ""],
 		"Commands this session: %d" % _command_count,
 		"Estimated tokens: ~%s (sent ~%s, returned ~%s)" % [
@@ -129,6 +138,14 @@ func _refresh() -> void:
 		"Estimate covers editor-bridge traffic only, not the AI client's full usage.",
 		"Click to open the MCP log.",
 	]))
+
+
+func _toolsets_line() -> String:
+	if _available_toolsets == 0:
+		return "Toolsets: (not reported by the server yet)"
+	return "Toolsets: %d of %d enabled: %s" % [
+		_enabled_toolsets.size(), _available_toolsets, ", ".join(_enabled_toolsets),
+	]
 
 
 # --- Accessors used by the headless dock smoke. ---
