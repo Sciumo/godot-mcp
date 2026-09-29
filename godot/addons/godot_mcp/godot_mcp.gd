@@ -27,6 +27,10 @@ const AutoRefreshHelper: GDScript = preload("./mcp_auto_refresh.gd")
 
 var _dock: MCPStatusDock
 var _dock_button: Button
+# The always-visible status-bar item: in the editor's bottom status bar next to
+# the toaster when that node is found, else the main toolbar (supported API).
+var _status_bar: MCPStatusBar
+var _status_bar_in_toolbar := false
 var _bridge: MCPBridge
 var _debugger: MCPDebugger
 var _router: MCPCommandRouter
@@ -53,6 +57,8 @@ func _enter_tree() -> void:
 		_dock_button.button_pressed = true
 		_update_button_icon(MCPBridge.Status.DISCONNECTED)
 
+	_install_status_bar()
+
 	# Feed static info the dock can show immediately.
 	_dock.set_server_version(_server_version_label())
 	_dock.set_bridge_url(_bridge_url())
@@ -66,8 +72,8 @@ func _enter_tree() -> void:
 	# Start the WebSocket bridge and reflect its state in the dock.
 	_bridge = MCPBridge.new(router)
 	_bridge.connection_changed.connect(_on_connection_changed)
-	_bridge.command_received.connect(_dock.log_command)
 	_bridge.command_completed.connect(_on_command_completed)
+	_bridge.command_traffic.connect(_on_command_traffic)
 	add_child(_bridge)
 	_bridge.start(_bridge_url())
 
@@ -143,6 +149,8 @@ func _exit_tree() -> void:
 		remove_debugger_plugin(_debugger)
 		_debugger = null
 
+	_remove_status_bar()
+
 	if _dock != null:
 		remove_control_from_bottom_panel(_dock)
 		_dock.queue_free()
@@ -173,6 +181,7 @@ func _refresh_all() -> void:
 	_dock.set_project_path(ProjectSettings.globalize_path("res://"))
 	_dock.set_bridge_url(_bridge_url())
 	_dock.set_server_version(_server_version_label())
+	_status_bar.set_server_version(_server_version_label())
 	_on_scene_changed(EditorInterface.get_edited_scene_root())
 	_on_selection_changed()
 
@@ -180,6 +189,7 @@ func _refresh_all() -> void:
 func _on_connection_changed(status: MCPBridge.Status) -> void:
 	# MCPBridge.Status and MCPStatusDock.ConnectionStatus share ordering by design.
 	_dock.set_connection_status(status as MCPStatusDock.ConnectionStatus)
+	_status_bar.set_connection_status(status as MCPStatusDock.ConnectionStatus)
 	_update_button_icon(status)
 
 
@@ -199,6 +209,7 @@ func _on_refresh_timer() -> void:
 	if _bridge != null:
 		var status := _bridge.get_status()
 		_dock.set_connection_status(status as MCPStatusDock.ConnectionStatus)
+		_status_bar.set_connection_status(status as MCPStatusDock.ConnectionStatus)
 		_update_button_icon(status)
 	# Issue #521: the server pushes its version via cmd_server_hello after the
 	# handshake; the router stores it in server_version. Reflect it on the next
@@ -207,6 +218,7 @@ func _on_refresh_timer() -> void:
 	if _router != null and _router.server_version != _server_version:
 		_server_version = _router.server_version
 		_dock.set_server_version(_server_version_label())
+		_status_bar.set_server_version(_server_version_label())
 
 
 ## The auto-refresh timer tick (issue #561): the decision lives in MCPAutoRefresh
@@ -230,6 +242,51 @@ func _on_auto_refresh_toggled(enabled: bool) -> void:
 		_auto_refresh_timer.start()
 	else:
 		_auto_refresh_timer.stop()
+
+
+## Place the status-bar item. The editor's bottom status bar (the row holding
+## the bottom-panel tabs, the toaster bell, and the version label) has no plugin
+## API, so find the EditorToaster by class and insert beside it; editor-internal
+## classes still answer is_class(), which find_children() uses. If a Godot
+## version moves or drops it, fall back to the supported main-toolbar container.
+func _install_status_bar() -> void:
+	_status_bar = MCPStatusBar.new()
+	_status_bar.clicked.connect(_on_status_bar_clicked)
+	var toasters := EditorInterface.get_base_control().find_children("*", "EditorToaster", true, false)
+	var toaster: Node = toasters[0] if not toasters.is_empty() else null
+	if toaster != null and toaster.get_parent() is BoxContainer:
+		var host := toaster.get_parent()
+		host.add_child(_status_bar)
+		host.move_child(_status_bar, toaster.get_index())
+		_status_bar_in_toolbar = false
+	else:
+		add_control_to_container(CONTAINER_TOOLBAR, _status_bar)
+		_status_bar_in_toolbar = true
+
+
+func _remove_status_bar() -> void:
+	if _status_bar == null:
+		return
+	if _status_bar_in_toolbar:
+		remove_control_from_container(CONTAINER_TOOLBAR, _status_bar)
+	elif _status_bar.get_parent() != null:
+		_status_bar.get_parent().remove_child(_status_bar)
+	_status_bar.queue_free()
+	_status_bar = null
+
+
+func _on_status_bar_clicked() -> void:
+	if _dock != null:
+		make_bottom_panel_item_visible(_dock)
+
+
+## One command round trip: the communication log line (dock) and the
+## always-visible status-bar item both get the command, time, and ~tokens.
+func _on_command_traffic(command: String, exec_ms: float, request_tokens: int, response_tokens: int) -> void:
+	_dock.log_command("%s  %.1f ms  ~%s tok" % [
+		command, exec_ms, MCPTraffic.format_tokens(request_tokens + response_tokens),
+	])
+	_status_bar.record_command(command, exec_ms, request_tokens, response_tokens)
 
 
 ## Set the bottom-bar button icon to a colored dot reflecting connection status.

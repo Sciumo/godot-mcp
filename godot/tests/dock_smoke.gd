@@ -12,6 +12,8 @@ extends SceneTree
 ## on its exit code + output.
 
 const MCPDockScript := preload("res://addons/godot_mcp/mcp_dock.gd")
+const MCPStatusBarScript := preload("res://addons/godot_mcp/mcp_status_bar.gd")
+const MCPTrafficScript := preload("res://addons/godot_mcp/mcp_traffic.gd")
 
 
 func _initialize() -> void:
@@ -109,6 +111,9 @@ func _initialize() -> void:
 
 	dock.free()
 
+	_check_traffic_estimate(failures)
+	_check_status_bar(failures)
+
 	if failures.is_empty():
 		print("DOCK_TEST_OK")
 		quit(0)
@@ -117,6 +122,59 @@ func _initialize() -> void:
 			printerr("FAIL: %s" % f)
 		print("DOCK_TEST_FAIL")
 		quit(1)
+
+
+## MCPTraffic: text is ~4 chars/token; an embedded PNG is priced by pixels
+## (~750/token), never by its base64 length.
+func _check_traffic_estimate(failures: Array[String]) -> void:
+	_expect(failures, "tokens_text", str(MCPTrafficScript.estimate_tokens("x".repeat(400), {})), "100")
+	var shot := {"ok": true, "result": {"format": "png", "width": 750, "height": 100, "base64": "A".repeat(40000)}}
+	var shot_text := JSON.stringify(shot)
+	var shot_tokens := MCPTrafficScript.estimate_tokens(shot_text, shot)
+	var want := int(ceil((shot_text.length() - 40000) / 4.0 + 100.0))
+	_expect(failures, "tokens_image", str(shot_tokens), str(want))
+	_expect(failures, "fmt_small", MCPTrafficScript.format_tokens(950), "950")
+	_expect(failures, "fmt_k", MCPTrafficScript.format_tokens(12345), "12.3k")
+	_expect(failures, "fmt_m", MCPTrafficScript.format_tokens(2_500_000), "2.5M")
+
+
+## MCPStatusBar: connection label, per-command line + totals, activity flash.
+func _check_status_bar(failures: Array[String]) -> void:
+	var bar := MCPStatusBarScript.new()
+	_expect(failures, "bar_disconnected", bar.displayed_name(), "MCP: Disconnected")
+	_expect(failures, "bar_no_totals", bar.displayed_totals(), "")
+	bar.set_connection_status(MCPDockScript.ConnectionStatus.CONNECTED)
+	_expect(failures, "bar_connected", bar.displayed_name(), "MCP")
+	if bar.displayed_dot_color() != MCPDockScript.connection_color(MCPDockScript.ConnectionStatus.CONNECTED):
+		failures.append("bar_dot_connected: dot not the connected color")
+
+	bar.record_command("cmd_get_scene_tree", 3.14, 20, 1180)
+	_expect(failures, "bar_last", bar.displayed_last(), "get_scene_tree  3.1 ms  ~1.2k tok")
+	_expect(failures, "bar_totals_1", bar.displayed_totals(), "1 · ~1.2k tok")
+	if bar.displayed_dot_color() != MCPStatusBarScript.ACTIVITY_COLOR:
+		failures.append("bar_flash: dot did not flash on a command")
+	bar.end_flash()
+	if bar.displayed_dot_color() != MCPDockScript.connection_color(MCPDockScript.ConnectionStatus.CONNECTED):
+		failures.append("bar_flash_end: dot did not return to the connected color")
+
+	bar.record_command("cmd_ping", 0.2, 5, 5)
+	_expect(failures, "bar_totals_2", bar.displayed_totals(), "2 · ~1.2k tok")
+	_expect(failures, "bar_total_tokens", str(bar.total_tokens()), "1210")
+	if not bar.tooltip_text.contains("editor-bridge traffic only"):
+		failures.append("bar_tooltip: missing the estimate caveat")
+
+	var got_click := [false]
+	bar.clicked.connect(func() -> void: got_click[0] = true)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	bar._gui_input(press)
+	if not got_click[0]:
+		failures.append("bar_click: left click did not emit clicked")
+
+	bar.set_connection_status(MCPDockScript.ConnectionStatus.DISCONNECTED)
+	_expect(failures, "bar_back_disconnected", bar.displayed_name(), "MCP: Disconnected")
+	bar.free()
 
 
 func _expect(failures: Array[String], label: String, got: String, want: String) -> void:

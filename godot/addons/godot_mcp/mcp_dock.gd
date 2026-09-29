@@ -159,9 +159,18 @@ func _add_field(parent: Container, caption: String) -> Label:
 	return value_label
 
 
+## Shared with MCPStatusBar so the dock and the status bar never disagree.
+static func connection_text(status: ConnectionStatus) -> String:
+	return _CONNECTION_TEXT.get(status, _UNKNOWN)
+
+
+static func connection_color(status: ConnectionStatus) -> Color:
+	return _CONNECTION_COLOR.get(status, Color.GRAY)
+
+
 func set_connection_status(status: ConnectionStatus) -> void:
-	_connection_value.text = _CONNECTION_TEXT.get(status, _UNKNOWN)
-	_status_dot.color = _CONNECTION_COLOR.get(status, Color.GRAY)
+	_connection_value.text = connection_text(status)
+	_status_dot.color = connection_color(status)
 
 
 func set_server_version(version: String) -> void:

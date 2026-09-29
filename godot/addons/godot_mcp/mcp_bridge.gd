@@ -39,6 +39,8 @@ signal command_received(command: String)
 ## commands, so a round-trip "latency" can't be measured here — one honest
 ## exec_ms replaces the mislabeled latency arg).
 signal command_completed(command: String, exec_ms: float)
+## Estimated context tokens for one round trip (MCPTraffic), for the status bar.
+signal command_traffic(command: String, exec_ms: float, request_tokens: int, response_tokens: int)
 
 # _peer is untyped so tests can inject a send-recording stand-in (peer_hello
 # smoke, #537); production only ever assigns a real WebSocketPeer.
@@ -229,13 +231,19 @@ func _handle_text(text: String) -> void:
 		cmd_name = str(d2.get("command", "?"))
 		response = _router.handle(d2)
 		command_received.emit(cmd_name)
+	var response_text := JSON.stringify(response)
 	if _peer != null:
-		_peer.send_text(JSON.stringify(response))
+		_peer.send_text(response_text)
 	# Handler execution time only (#520): the addon responds to commands, it
 	# never originates them, so there is no send-side timestamp to diff —
 	# exec_ms is the one honest number this side can measure.
 	var exec_ms := (Time.get_ticks_usec() - send_time) / 1000.0
 	command_completed.emit(cmd_name, exec_ms)
+	command_traffic.emit(
+		cmd_name, exec_ms,
+		MCPTraffic.estimate_tokens(text, parsed),
+		MCPTraffic.estimate_tokens(response_text, response),
+	)
 
 
 func _set_status(status: Status) -> void:
