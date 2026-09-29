@@ -238,12 +238,14 @@ func _handle_text(text: String) -> void:
 	# never originates them, so there is no send-side timestamp to diff —
 	# exec_ms is the one honest number this side can measure.
 	var exec_ms := (Time.get_ticks_usec() - send_time) / 1000.0
-	command_completed.emit(cmd_name, exec_ms)
+	# Traffic first: its listener logs the command, and command_completed's
+	# listener reads the logged count for the dock's Total.
 	command_traffic.emit(
 		cmd_name, exec_ms,
 		MCPTraffic.estimate_tokens(text, parsed),
 		MCPTraffic.estimate_tokens(response_text, response),
 	)
+	command_completed.emit(cmd_name, exec_ms)
 
 
 func _set_status(status: Status) -> void:
